@@ -1,0 +1,96 @@
+Parameters:
+  KeyName:
+    Description: Name of an existing EC2 KeyPair to enable SSH to the instances
+    Type: 'AWS::EC2::KeyPair::KeyName'
+  Kpassword:
+    Description: Password for Kadmin/admin
+    Type: String
+  AdminServerhost:
+    Description: Provide the Kadmin Server Host and Port (749)
+    Type: String
+    Default : ip-172-31-76-61.ec2.internal:749
+  KdcServerhost:
+    Description: Provide the KDC Server Host and Port (88)
+    Type: String
+    Default : ip-172-31-76-61.ec2.internal:88
+  KerberosRealm:
+    Description: Provide Realm
+    Type: String
+    Default : EXAMPLE.COM
+  LogLocation:
+    Description: 's3://aws-logs-<AccountID>-us-east-1/elasticmapreduce/'
+    Type: String
+    Default: 's3://aws-logs-956071616555-us-east-1/elasticmapreduce/'
+  CertificateLocation:
+    Description: s3 location where certificate stored
+    Type: String
+  EMRSecurityConfigurationName:
+    Description: Name of Security Configurations
+    Type: String
+  emrReleaseLabel:
+    Default: emr-5.33.0
+    AllowedValues:
+      - emr-5.0.0
+      - emr-5.4.0
+      - emr-5.16.0
+      - emr-5.17.0
+      - emr-5.26.0
+      - emr-5.27.0
+      - emr-5.28.0
+      - emr-5.28.1
+      - emr-5.29.0
+      - emr-5.30.0
+      - emr-5.33.0
+    Description: Release label for the EMR cluster
+    Type: String
+Resources:
+  EMRMITKDC:
+    Type: 'AWS::EMR::Cluster'
+    Properties:
+      Applications:
+        - Name: Hadoop
+        - Name: Hive
+        - Name: Spark
+        - Name: Hue
+      Instances:
+        Ec2KeyName: !Ref KeyName
+        MasterInstanceGroup:
+          InstanceCount: 1
+          InstanceType: m4.xlarge
+        CoreInstanceGroup:
+          InstanceCount: 1
+          InstanceType: m4.xlarge
+        TerminationProtected: 'true'
+      JobFlowRole: EMR_EC2_DefaultRole
+      Name: CF-Presto
+      ServiceRole: EMR_DefaultRole
+      ReleaseLabel: !Ref emrReleaseLabel
+      LogUri: !Ref LogLocation
+      SecurityConfiguration: !Ref EmrSecurityConfiguration
+      KerberosAttributes: 
+       Realm: !Ref KerberosRealm
+       KdcAdminPassword: !Ref Kpassword
+  EmrSecurityConfiguration:
+    Type: 'AWS::EMR::SecurityConfiguration'
+    Properties:
+      Name: !Ref EMRSecurityConfigurationName
+      SecurityConfiguration:
+        EncryptionConfiguration:
+         EnableInTransitEncryption : true
+         EnableAtRestEncryption : false
+         InTransitEncryptionConfiguration : 
+          TLSCertificateConfiguration :
+           CertificateProviderType : 'PEM'
+           S3Object : !Ref CertificateLocation
+        AuthenticationConfiguration:
+         KerberosConfiguration:
+          Provider: ExternalKdc
+          ExternalKdcConfiguration:
+           KdcServerType: Single
+           AdminServer: !Ref AdminServerhost
+           KdcServer: !Ref KdcServerhost
+Outputs:
+  MyEMRMasterIP:
+    Value: !GetAtt 
+      - EMRMITKDC
+      - MasterPublicDNS

@@ -1,0 +1,186 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: CloudFormation template for creating an ec2 instance
+Parameters:
+  KeyName:
+    Description: Key Pair name
+    Type: 'AWS::EC2::KeyPair::KeyName'
+    Default: key
+  EC2InstanceProfileName:
+    Description: Provide the name for Ec2 instance  profile
+    Type: String
+  EC2InstanceRoleName:
+    Description: Provide the name for Ec2 instance Role
+    Type: String
+  InstanceType:
+    Description: Select one of the possible instance types
+    Type: String
+    Default: m4.xlarge
+    AllowedValues:
+      - t2.micro
+      - t2.small
+      - t2.medium
+      - m4.xlarge
+Resources:
+  Instance:
+    Type: 'AWS::EC2::Instance'
+    DependsOn: EC2InstanceProfile
+    Properties:
+      ImageId: ami-0dc2d3e4c0f9ebd18
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      UserData:
+        Fn::Base64: |
+            #!/bin/bash
+            yum install -y openldap openldap-clients openldap-servers migrationtools
+            slappasswd -s changeit -n > /etc/openldap/passwd
+            openssl req -x509 -new -out /etc/openldap/certs/cert.crt -keyout /etc/openldap/certs/priv.key -days 365 -nodes -subj '/C=US/ST=Texas/L=Dallas/O=AWS/OU=PS/CN=*.ec2.internal'
+            chown -v ldap:ldap /etc/openldap/certs/{cert.crt,priv.key}
+            chmod 600 /etc/openldap/certs/priv.key
+            cp /usr/share/openldap-servers/DB_CONFIG.example /var/lib/ldap/DB_CONFIG
+            chown -R ldap:ldap /var/lib/ldap
+            systemctl enable slapd
+            systemctl start slapd
+            sudo ss -ltap | grep ldap
+            ldapadd -Y EXTERNAL -H ldapi:/// -D "cn=config" -f /etc/openldap/schema/cosine.ldif
+            ldapadd -Y EXTERNAL -H ldapi:/// -D "cn=config" -f /etc/openldap/schema/nis.ldif
+            pass=$(cat /etc/openldap/passwd)
+            echo "dn: olcDatabase={2}hdb,cn=config
+            changetype: modify
+            replace: olcSuffix
+            olcSuffix: dc=ec2,dc=internal
+
+            dn: olcDatabase={2}hdb,cn=config
+            changetype: modify
+            replace: olcRootDN
+            olcRootDN: cn=Manager,dc=ec2,dc=internal
+
+            dn: olcDatabase={2}hdb,cn=config
+            changetype: modify
+            replace: olcRootPW
+            olcRootPW: PASSWORD
+
+            dn: cn=config
+            changetype: modify
+            replace: olcLogLevel
+            olcLogLevel: -1
+
+            dn: olcDatabase={1}monitor,cn=config
+            changetype: modify
+            replace: olcAccess
+            olcAccess: {0}to * by dn.base=\"gidNumber=0+uidNumber=0,cn=peercred,cn=external,cn=auth\" read by dn.base=\"cn=Manager,dc=ec2,dc=internal\" read by * none" >/etc/openldap/changes.ldif
+
+            sed -i "s|PASSWORD|$pass|g" /etc/openldap/changes.ldif
+            ldapmodify -Y EXTERNAL -H ldapi:/// -f /etc/openldap/changes.ldif
+            echo "dn: cn=config
+            changetype: modify
+            replace: olcTLSCertificateFile
+            olcTLSCertificateFile: /etc/openldap/certs/cert.crt
+            -
+            replace: olcTLSCertificateKeyFile
+            olcTLSCertificateKeyFile: /etc/openldap/certs/priv.key" >/etc/openldap/tlschanges.ldif
+
+            ldapmodify -Y EXTERNAL -H ldapi:/// -f /etc/openldap/tlschanges.ldif
+
+            echo "dn: dc=ec2,dc=internal
+            dc: ec2
+            objectClass: top
+            objectClass: domain
+        
+            dn: ou=People,dc=ec2,dc=internal
+            ou: People
+            objectClass: top
+            objectClass: organizationalUnit
+        
+            dn: ou=Group,dc=ec2,dc=internal
+            ou: Group
+            objectClass: top
+            objectClass: organizationalUnit" > /etc/openldap/base.ldif
+            ldapadd -x -w changeit -D cn=Manager,dc=ec2,dc=internal -f /etc/openldap/base.ldif
+            mkdir /home/ldap/
+            useradd -d /home/ldap/ldapuser01 ldapuser01
+            echo "changeit" | passwd ldapuser01 --stdin
+            useradd -d /home/ldap/ldapuser02 ldapuser02
+            echo "changeit" | passwd ldapuser02 --stdin
+            sed -i 's|padl.com|ec2.internal|' /usr/share/migrationtools/migrate_common.ph
+            sed -i 's|dc=padl,dc=com|dc=ec2,dc=internal|' /usr/share/migrationtools/migrate_common.ph
+            grep ":10[0-9][0-9]" /etc/passwd > passwd
+            export LC_ALL="en_US.UTF-8" 
+            /usr/share/migrationtools/migrate_passwd.pl passwd users.ldif
+            ldapadd -x -w changeit -D cn=Manager,dc=ec2,dc=internal -f users.ldif
+            grep ":10[0-9][0-9]" /etc/group > group
+            /usr/share/migrationtools/migrate_group.pl group groups.ldif
+            ldapadd -x -w changeit -D cn=Manager,dc=ec2,dc=internal -f groups.ldif
+            sed -i 's|SLAPD_URLS="ldapi:/// ldap:///"|SLAPD_URLS="ldapi:/// ldap:/// ldaps:///"|' /etc/sysconfig/slapd
+            systemctl restart slapd
+            ss -ltap | grep ldap
+            echo "Successfully configured LDAP"
+            echo "run 'ldapsearch -x cn=ldapuser01 -b dc=ec2,dc=internal' and confirm if ldap is working as expected"
+            aws s3 cp /etc/openldap/certs/cert.crt s3://nht-jagat-12/ldap/
+            echo "certificate copied to s3"
+            sleep 2
+            touch copycert.sh
+            echo '#!/bin/bash'>copycert.sh
+            echo 'aws s3 cp s3://nht-jagat-12/ldap/cert.crt /home/hadoop/'>>copycert.sh
+            echo 'sudo keytool -import -keystore /usr/lib/jvm/java-1.8.0-amazon-corretto.x86_64/jre/lib/security/cacerts -trustcacerts -alias ldap_server -file /home/hadoop/cert.crt -storepass changeit -noprompt'>>copycert.sh
+            sleep 2
+            aws s3 cp copycert.sh s3://nht-jagat-12/ldap/
+            echo "certificate copied to s3"
+  
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    DependsOn: Ec2InstanceRole
+    Properties: 
+      InstanceProfileName: !Ref EC2InstanceProfileName
+      Path: /
+      Roles: 
+       - !Ref Ec2InstanceRole
+  Ec2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref EC2InstanceRoleName
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+
+  InstanceS3Policy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: S3Policy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Action:
+              - s3:ListBucket
+              - s3:PutObject
+              - s3:PutObjectAcl
+              - s3:GetObject
+              - s3:GetObjectAcl
+              - s3:DeleteObject
+            Resource:
+              - arn:aws:s3:::nht-jagat-12/*
+              - arn:aws:s3:::nht-jagat-12
+      Roles:
+        -
+          !Ref Ec2InstanceRole
+Outputs:
+  PublicName:
+    Value: !GetAtt 
+      - Instance
+      - PublicDnsName
+    Description: Public name (connect via SSH)
+  PrivateName:
+    Value: !GetAtt 
+      - Instance
+      - PrivateDnsName
+    Description: Private name (connect via Ldap)

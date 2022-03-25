@@ -1,0 +1,161 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: CloudFormation template for creating an ec2 instance
+Parameters:
+  KeyName:
+    Description: Key Pair name
+    Type: 'AWS::EC2::KeyPair::KeyName'
+    Default: my_keypair_name
+  InstanceType:
+    Description: Select one of the possible instance types
+    Type: String
+    Default: m4.xlarge
+    AllowedValues:
+      - t2.micro
+      - t2.small
+      - t2.medium
+      - m4.xlarge
+  ProfileName:
+    Description: Instance Profile Name
+    Type: String
+    Default: my_InstanceProfile_name
+  RoleName:
+    Description: Instance Role Name
+    Type: String
+    Default: my_InstanceRole_name
+  EMRMasterSecurityGroup:
+    Description: Master Security Group
+    Type: 'AWS::EC2::SecurityGroup::Id'
+  EMRSlaveSecurityGroup:
+    Description: Slave Secrutiy Group
+    Type: 'AWS::EC2::SecurityGroup::Id'
+  MyIP:
+    Description: My IP
+    Type: String
+
+Resources:
+  Server:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      ImageId: ami-0dc2d3e4c0f9ebd18
+      SecurityGroups:
+      - !Ref InstanceSecurityGroup
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      IamInstanceProfile: !Ref DemoInstanceProfile
+      UserData:
+        Fn::Base64: |
+            #!/bin/bash
+            set -euo pipefail
+            set -x
+            hostname=`hostname -f | xargs`
+            sudo yum install krb5-server krb5-libs -y
+            cd /etc
+            sudo sed -i "s|# default_realm = EXAMPLE.COM| default_realm = EXAMPLE.COM|g" krb5.conf
+            sudo sed -i "s|# EXAMPLE.COM| EXAMPLE.COM|g" krb5.conf
+            sudo sed -i "s|#  kdc = kerberos.example.com|  kdc = $hostname:88|g" krb5.conf
+            sudo sed -i "s|#  admin_server = kerberos.example.com|  admin_server = $hostname:749|g" krb5.conf
+            sudo sed -i "s|# }| default_domain = ec2.internal \n}|g" krb5.conf
+            sudo sed -i "s|# .example.com = EXAMPLE.COM| .ec2.internal = EXAMPLE.COM|g" krb5.conf
+            sudo sed -i "s|# example.com = EXAMPLE.COM| ec2.internal = EXAMPLE.COM|g" krb5.conf
+            wait
+            cd /var/kerberos/krb5kdc
+            sudo sed -i "s|#master_key_type = aes256-cts|master_key_type = aes256-cts|g" kdc.conf
+            sudo kdb5_util create -r EXAMPLE.COM -s <<EOF
+ 
+ 
+ 
+ 
+ 
+            changeit
+            changeit
+            EOF
+            wait
+            sudo kadmin.local addprinc root/admin <<EOF
+            changeit
+            changeit
+            EOF
+            wait
+            sudo service krb5kdc.service start
+            sudo service kadmin.service start
+            sudo systemctl enable krb5kdc.service
+            sudo systemctl enable kadmin.service
+            sleep 2
+            sudo kadmin.local addprinc -randkey host/$hostname
+            sudo kadmin.local ktadd host/$hostname
+            sleep 2
+            sudo kadmin.local cpw kadmin/admin <<EOF
+            changeit
+            changeit
+            EOF
+  InstanceSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Enable HTTP access
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref MyIP
+        - IpProtocol: tcp
+          FromPort: 0
+          ToPort: 65535
+          SourceSecurityGroupId: !Ref EMRMasterSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 0
+          ToPort: 65535
+          SourceSecurityGroupId: !Ref EMRSlaveSecurityGroup
+        - IpProtocol: udp
+          FromPort: 0
+          ToPort: 65535
+          SourceSecurityGroupId: !Ref EMRMasterSecurityGroup
+        - IpProtocol: udp
+          FromPort: 0
+          ToPort: 65535
+          SourceSecurityGroupId: !Ref EMRSlaveSecurityGroup
+  DemoInstanceProfile:
+    Type: 'AWS::IAM::InstanceProfile'
+    Properties:
+      InstanceProfileName: !Ref ProfileName
+      Path: /
+      Roles:
+        - !Ref DemoEc2InstanceRole
+  DemoEc2InstanceRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Ref RoleName
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+  DemoInstanceS3Policy:
+    Type: 'AWS::IAM::Policy'
+    Properties:
+      PolicyName: DemoS3Policy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - 's3:*'
+            Resource:
+              - 'arn:aws:s3:::nht-jagat-12/*'
+              - 'arn:aws:s3:::nht-jagat-12'
+      Roles:
+        - !Ref DemoEc2InstanceRole
+Outputs:
+  PublicName:
+    Value: !GetAtt 
+      - Server
+      - PublicDnsName
+    Description: Public name (connect via SSH)
+  PrivateName:
+    Value: !GetAtt 
+      - Server
+      - PrivateDnsName
+    Description: Private name (For kerberos)
