@@ -16,7 +16,7 @@ Parameters:
   LDAPURL:
     Description: 'Provide the LDAPURL with PORT'
     Type: String
-    Default: ldaps://ip-172-31-71-188.ec2.internal:636
+    Default: ldaps://ip-XXX-XX-XX-XXX.ec2.internal:636
   LDAPBindUser:
     Description: 'Provide the LDAPBind User'
     Type: String
