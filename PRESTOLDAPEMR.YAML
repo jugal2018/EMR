@@ -5,7 +5,7 @@ Parameters:
   LogLocation:
     Description: 's3://aws-logs-{AccountId}-us-east-1/elasticmapreduce/'
     Type: String
-    Default: s3://aws-logs-956071616555-us-east-1/elasticmapreduce/
+    Default: s3://aws-logs-XXXXX-us-east-1/elasticmapreduce/
   CertificateLocation:
     Description: 's3 location where certificate is stored'
     Type: String
