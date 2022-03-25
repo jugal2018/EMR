@@ -8,11 +8,11 @@ Parameters:
   AdminServerhost:
     Description: Provide the Kadmin Server Host and Port (749)
     Type: String
-    Default : ip-172-31-76-61.ec2.internal:749
+    Default : ip-1XX-XX-XX-XX.ec2.internal:749
   KdcServerhost:
     Description: Provide the KDC Server Host and Port (88)
     Type: String
-    Default : ip-172-31-76-61.ec2.internal:88
+    Default : ip-1XX-XX-XX-XX.ec2.internal:88
   KerberosRealm:
     Description: Provide Realm
     Type: String
@@ -20,7 +20,7 @@ Parameters:
   LogLocation:
     Description: 's3://aws-logs-<AccountID>-us-east-1/elasticmapreduce/'
     Type: String
-    Default: 's3://aws-logs-956071616555-us-east-1/elasticmapreduce/'
+    Default: 's3://aws-logs-XXXXXX-us-east-1/elasticmapreduce/'
   CertificateLocation:
     Description: s3 location where certificate stored
     Type: String
